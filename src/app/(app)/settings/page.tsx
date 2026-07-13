@@ -1,0 +1,22 @@
+import type { Metadata } from "next";
+import { BankActions, LogoutButton } from "@/components/settings-actions";
+import { Icon } from "@/components/icon";
+import { getDashboardData } from "@/lib/data";
+
+export const metadata: Metadata = { title: "Réglages" };
+
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ bank?: string; connected?: string }> }) {
+  const params = await searchParams;
+  const data = await getDashboardData();
+  const connected = data.connection?.status === "linked";
+  return <div className="page settings-page"><header className="page-header"><div><p className="eyebrow">CONFIGURATION</p><h1>Réglages</h1><p className="muted">Gérez votre banque, la synchronisation et la sécurité.</p></div></header>
+    {params.bank === "connected" || params.connected === "demo" ? <div className="success-banner">BoursoBank est connecté. Vos opérations sont à jour.</div> : null}
+    {params.bank === "error" ? <div className="error-banner">La connexion bancaire n’a pas pu être finalisée. Vous pouvez réessayer.</div> : null}
+    <section className="settings-section card"><div className="settings-icon"><Icon name="bank"/></div><div className="settings-copy"><p className="eyebrow">CONNEXION BANCAIRE</p><h2>{data.connection?.institution_name ?? "BoursoBank"}</h2><p className="muted">{connected ? `${data.accounts.length} compte(s) synchronisé(s) via GoCardless.` : "Connectez votre compte sans partager vos identifiants avec l’application."}</p>
+      <div className="connection-meta"><span className={`connection-status ${connected ? "ok" : ""}`}><i/>{connected ? "Connecté" : data.connection?.status === "expired" ? "Consentement expiré" : "Non connecté"}</span>{data.connection?.consent_expires_at ? <span>Renouvellement avant le {new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(new Date(data.connection.consent_expires_at))}</span> : null}{data.lastSyncedAt ? <span>Dernière synchro : {new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(data.lastSyncedAt))}</span> : null}</div>
+      {data.connection?.error_message ? <p className="form-error">{data.connection.error_message}</p> : null}<BankActions connected={connected} demo={data.demo}/></div></section>
+    <section className="settings-section card"><div className="settings-icon"><Icon name="sparkles"/></div><div className="settings-copy"><p className="eyebrow">CATÉGORISATION</p><h2>Règles + intelligence artificielle</h2><p className="muted">Les règles locales passent toujours en premier. Seuls le libellé nettoyé et le sens de l’opération sont transmis à OpenAI lorsque nécessaire.</p><div className="privacy-pills"><span>Jamais d’IBAN</span><span>Jamais d’identité</span><span>Corrections mémorisées</span></div></div></section>
+    <section className="settings-section card"><div className="settings-icon"><Icon name="lock"/></div><div className="settings-copy"><p className="eyebrow">SÉCURITÉ</p><h2>Code PIN et session privée</h2><p className="muted">La session est conservée 30 jours dans un cookie chiffré. Verrouillez l’application immédiatement sur un appareil partagé.</p><LogoutButton/></div></section>
+    <section className="about-card"><span className="brand-mark">M</span><div><strong>Mon budget</strong><p>Version 0.1.0 · PWA personnelle</p></div></section>
+  </div>;
+}
