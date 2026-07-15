@@ -9,6 +9,7 @@ import { getSupabaseAdmin } from "./supabase/admin";
 
 export const SESSION_COOKIE = "budget_session";
 const THIRTY_DAYS = 30 * 24 * 60 * 60;
+const TWO_HOURS = 2 * 60 * 60;
 
 function secret(): Uint8Array {
   return new TextEncoder().encode(process.env.SESSION_SECRET || "demo-session-secret-change-me");
@@ -21,6 +22,24 @@ export async function createSessionToken(): Promise<string> {
     .setExpirationTime(`${THIRTY_DAYS}s`)
     .setSubject("owner")
     .sign(secret());
+}
+
+export async function createBankCallbackToken(connectionId: string): Promise<string> {
+  return new SignJWT({ scope: "budget:bank-callback" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${TWO_HOURS}s`)
+    .setSubject(connectionId)
+    .sign(secret());
+}
+
+export async function verifyBankCallbackToken(token: string, connectionId: string): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
+    return payload.sub === connectionId && payload.scope === "budget:bank-callback";
+  } catch {
+    return false;
+  }
 }
 
 export async function hasValidSession(): Promise<boolean> {

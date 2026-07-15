@@ -43,7 +43,7 @@ export interface BudgetTransaction {
   is_transfer: boolean;
   manually_categorized: boolean;
   category?: Category | null;
-  account?: Pick<BankAccount, "name"> | null;
+  account?: Pick<BankAccount, "id" | "name" | "iban_masked"> | null;
 }
 
 export interface MonthlyBudget {

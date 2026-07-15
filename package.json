@@ -1,6 +1,6 @@
 {
   "name": "mon-budget",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,7 +12,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@supabase/supabase-js": "2.110.2",
+    "@supabase/ssr": "0.12.1",
+    "@supabase/supabase-js": "2.110.3",
     "bcryptjs": "3.0.3",
     "jose": "6.2.3",
     "next": "16.2.10",

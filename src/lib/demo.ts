@@ -76,7 +76,7 @@ export const demoTransactions: BudgetTransaction[] = [
     is_transfer: false,
     manually_categorized: false,
     category,
-    account: { name: account.name },
+    account: { id: account.id, name: account.name, iban_masked: account.iban_masked },
   };
 });
 

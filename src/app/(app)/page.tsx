@@ -23,6 +23,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <div><p>Solde total</p><strong>{formatCurrency(data.balance)}</strong><span><i className="status-dot"/> {data.accounts.length} compte{data.accounts.length > 1 ? "s" : ""} connecté{data.accounts.length > 1 ? "s" : ""}</span></div>
       <div className="hero-month"><p>{monthLabel(data.month)}</p><span>Mis à jour {data.lastSyncedAt ? new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(new Date(data.lastSyncedAt)) : "jamais"}</span></div>
     </section>
+    <section className="account-summary-grid" aria-label="Comptes connectés">
+      {data.accounts.map((account) => <article className="account-summary card" key={account.id}><div><p>{account.name}</p><span>{account.iban_masked ?? account.currency}</span></div><strong>{formatCurrency(account.balance)}</strong></article>)}
+    </section>
     <section className="metric-grid">
       <article className="metric card"><span className="metric-icon income"><Icon name="arrows"/></span><div><p>Revenus</p><strong>{formatCurrency(data.income)}</strong><small>Ce mois-ci</small></div></article>
       <article className="metric card"><span className="metric-icon expense"><Icon name="arrows"/></span><div><p>Dépenses</p><strong>{formatCurrency(data.expenses)}</strong><small className={(data.expenseDelta ?? 0) <= 0 ? "good" : "bad"}>{data.expenseDelta === null ? "Pas de comparaison" : `${data.expenseDelta > 0 ? "+" : ""}${data.expenseDelta.toFixed(1)} % vs mois dernier`}</small></div></article>

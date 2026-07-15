@@ -9,6 +9,7 @@ import {
   transactionFingerprint,
 } from "./budget";
 import { isDemoMode, requireEnv } from "./env";
+import { createBankCallbackToken } from "./session";
 import { getSupabaseAdmin } from "./supabase/admin";
 import type { BankAccount, BudgetTransaction, Category, GoCardlessTransaction } from "./types";
 
@@ -104,6 +105,9 @@ export async function createBankConnection(appUrl: string): Promise<string> {
 
   const accessDays = Math.min(Number(institution.max_access_valid_for_days || 90), 90);
   const historyDays = Math.min(Number(institution.transaction_total_days || 730), 730);
+  const callbackUrl = new URL("/api/gocardless/callback", appUrl);
+  callbackUrl.searchParams.set("connection", connection.id);
+  callbackUrl.searchParams.set("token", await createBankCallbackToken(connection.id));
   const agreement = await gcFetch<{ id: string }>("/agreements/enduser/", {
     method: "POST",
     body: JSON.stringify({
@@ -116,7 +120,7 @@ export async function createBankConnection(appUrl: string): Promise<string> {
   const requisition = await gcFetch<Requisition>("/requisitions/", {
     method: "POST",
     body: JSON.stringify({
-      redirect: `${appUrl}/api/gocardless/callback?connection=${connection.id}`,
+      redirect: callbackUrl.toString(),
       institution_id: institution.id,
       reference: connection.id,
       agreement: agreement.id,
@@ -239,57 +243,81 @@ async function importTransactions(account: BankAccount, rows: GoCardlessTransact
 export async function syncBankData(trigger: "app_open" | "manual" | "callback", force = false): Promise<{ imported: number; skipped: boolean }> {
   if (isDemoMode()) return { imported: 0, skipped: true };
   const supabase = getSupabaseAdmin();
-  const { data: connection } = await supabase.from("bank_connections").select("*").eq("status", "linked").order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (!connection) return { imported: 0, skipped: true };
-  if (!force && connection.last_synced_at && Date.now() - new Date(connection.last_synced_at).getTime() < 15 * 60_000) return { imported: 0, skipped: true };
+  const { data: connections, error: connectionsError } = await supabase
+    .from("bank_connections")
+    .select("*")
+    .eq("status", "linked")
+    .order("created_at", { ascending: false });
+  if (connectionsError) throw connectionsError;
+  const eligibleConnections = (connections ?? []).filter((connection) =>
+    force || !connection.last_synced_at || Date.now() - new Date(connection.last_synced_at).getTime() >= 15 * 60_000,
+  );
+  if (!eligibleConnections.length) return { imported: 0, skipped: true };
 
   const { data: running } = await supabase.from("sync_runs").select("id").eq("status", "running").maybeSingle();
   if (running) return { imported: 0, skipped: true };
-  const { data: run, error: runError } = await supabase.from("sync_runs").insert({ connection_id: connection.id, status: "running", trigger }).select("id").single();
-  if (runError) return { imported: 0, skipped: true };
+  let imported = 0;
+  let successfulConnections = 0;
+  let firstError: GoCardlessError | null = null;
 
-  try {
-    const { data: accounts, error } = await supabase.from("bank_accounts").select("*").eq("connection_id", connection.id);
-    if (error) throw error;
-    let imported = 0;
-    for (const account of accounts as BankAccount[]) {
-      const [transactionData, balances] = await Promise.all([
-        gcFetch<{ transactions: { booked?: GoCardlessTransaction[]; pending?: GoCardlessTransaction[] } }>(`/accounts/${account.external_id}/transactions/`),
-        gcFetch<{ balances: Array<{ balanceAmount: { amount: string; currency: string }; balanceType: string }> }>(`/accounts/${account.external_id}/balances/`),
+  for (const connection of eligibleConnections) {
+    const { data: run, error: runError } = await supabase
+      .from("sync_runs")
+      .insert({ connection_id: connection.id, status: "running", trigger })
+      .select("id")
+      .single();
+    if (runError) {
+      firstError ??= new GoCardlessError("SYNC_ERROR", runError.message);
+      continue;
+    }
+
+    try {
+      const { data: accounts, error } = await supabase.from("bank_accounts").select("*").eq("connection_id", connection.id);
+      if (error) throw error;
+      let connectionImported = 0;
+      for (const account of accounts as BankAccount[]) {
+        const [transactionData, balances] = await Promise.all([
+          gcFetch<{ transactions: { booked?: GoCardlessTransaction[]; pending?: GoCardlessTransaction[] } }>(`/accounts/${account.external_id}/transactions/`),
+          gcFetch<{ balances: Array<{ balanceAmount: { amount: string; currency: string }; balanceType: string }> }>(`/accounts/${account.external_id}/balances/`),
+        ]);
+        const current = balances.balances.find((item) => /interim|closing|expected/i.test(item.balanceType)) ?? balances.balances[0];
+        const available = balances.balances.find((item) => /available/i.test(item.balanceType));
+        // Les opérations en attente sont enregistrées d’abord ; la version
+        // comptabilisée les réconcilie ensuite et reste la source de vérité.
+        const pendingCount = await importTransactions(account, transactionData.transactions.pending ?? [], "pending");
+        const bookedCount = await importTransactions(account, transactionData.transactions.booked ?? [], "booked");
+        connectionImported += bookedCount + pendingCount;
+        await supabase.from("bank_accounts").update({
+          balance: Number(current?.balanceAmount.amount ?? account.balance),
+          available_balance: available ? Number(available.balanceAmount.amount) : null,
+          last_synced_at: new Date().toISOString(),
+        }).eq("id", account.id);
+      }
+
+      const finished = new Date().toISOString();
+      await Promise.all([
+        supabase.from("bank_connections").update({ last_synced_at: finished, error_message: null }).eq("id", connection.id),
+        supabase.from("sync_runs").update({ status: "success", imported_count: connectionImported, finished_at: finished }).eq("id", run.id),
       ]);
-      const current = balances.balances.find((item) => /interim|closing|expected/i.test(item.balanceType)) ?? balances.balances[0];
-      const available = balances.balances.find((item) => /available/i.test(item.balanceType));
-      // Les opérations en attente sont enregistrées d’abord ; la version
-      // comptabilisée les réconcilie ensuite et reste la source de vérité.
-      const pendingCount = await importTransactions(account, transactionData.transactions.pending ?? [], "pending");
-      const bookedCount = await importTransactions(account, transactionData.transactions.booked ?? [], "booked");
-      imported += bookedCount + pendingCount;
-      await supabase.from("bank_accounts").update({
-        balance: Number(current?.balanceAmount.amount ?? account.balance),
-        available_balance: available ? Number(available.balanceAmount.amount) : null,
-        last_synced_at: new Date().toISOString(),
-      }).eq("id", account.id);
+      imported += connectionImported;
+      successfulConnections += 1;
+    } catch (error) {
+      const known = error instanceof GoCardlessError ? error : new GoCardlessError("SYNC_ERROR", error instanceof Error ? error.message : "Erreur de synchronisation");
+      firstError ??= known;
+      const finished = new Date().toISOString();
+      await Promise.all([
+        supabase.from("bank_connections").update({ status: known.code === "ACCESS_EXPIRED" ? "expired" : "linked", error_message: known.message }).eq("id", connection.id),
+        supabase.from("sync_runs").update({ status: "error", error_code: known.code, error_message: known.message, finished_at: finished }).eq("id", run.id),
+      ]);
     }
-
-    const { data: recent } = await supabase.from("transactions").select("*").gte("booked_at", addDays(new Date(), -7).toISOString().slice(0, 10));
-    const transferIds = detectTransfers((recent ?? []).map((item) => ({ ...item, amount: Number(item.amount) })) as BudgetTransaction[]);
-    if (transferIds.size) {
-      const { data: transferCategory } = await supabase.from("categories").select("id").eq("slug", "transferts").single();
-      await supabase.from("transactions").update({ is_transfer: true, category_id: transferCategory!.id, category_source: "heuristic" }).in("id", [...transferIds]);
-    }
-    const finished = new Date().toISOString();
-    await Promise.all([
-      supabase.from("bank_connections").update({ last_synced_at: finished, error_message: null }).eq("id", connection.id),
-      supabase.from("sync_runs").update({ status: "success", imported_count: imported, finished_at: finished }).eq("id", run.id),
-    ]);
-    return { imported, skipped: false };
-  } catch (error) {
-    const known = error instanceof GoCardlessError ? error : new GoCardlessError("SYNC_ERROR", error instanceof Error ? error.message : "Erreur de synchronisation");
-    const finished = new Date().toISOString();
-    await Promise.all([
-      supabase.from("bank_connections").update({ status: known.code === "ACCESS_EXPIRED" ? "expired" : "linked", error_message: known.message }).eq("id", connection.id),
-      supabase.from("sync_runs").update({ status: "error", error_code: known.code, error_message: known.message, finished_at: finished }).eq("id", run.id),
-    ]);
-    throw known;
   }
+
+  const { data: recent } = await supabase.from("transactions").select("*").gte("booked_at", addDays(new Date(), -7).toISOString().slice(0, 10));
+  const transferIds = detectTransfers((recent ?? []).map((item) => ({ ...item, amount: Number(item.amount) })) as BudgetTransaction[]);
+  if (transferIds.size) {
+    const { data: transferCategory } = await supabase.from("categories").select("id").eq("slug", "transferts").single();
+    await supabase.from("transactions").update({ is_transfer: true, category_id: transferCategory!.id, category_source: "heuristic" }).in("id", [...transferIds]);
+  }
+  if (!successfulConnections && firstError) throw firstError;
+  return { imported, skipped: false };
 }
