@@ -22,6 +22,16 @@ export interface BankAccount {
   balance: number;
   available_balance: number | null;
   last_synced_at: string | null;
+  balance_quota_remaining: number | null;
+  balance_quota_reset_at: string | null;
+  transaction_quota_remaining: number | null;
+  transaction_quota_reset_at: string | null;
+}
+
+export interface BankSyncStatus {
+  lastSyncedAt: string | null;
+  quotaRemaining: number | null;
+  quotaResetAt: string | null;
 }
 
 export interface BudgetTransaction {
@@ -61,12 +71,41 @@ export interface BudgetLine {
   progress: number;
 }
 
+export interface CategorySpendingTotal {
+  category: Category;
+  amount: number;
+  transactions: BudgetTransaction[];
+}
+
+export interface CategoryMonthlyAverage {
+  category: Category;
+  amount: number;
+  total: number;
+}
+
+export interface CategorySpendingSeries {
+  category: Category;
+  total: number;
+  values: number[];
+}
+
+export interface SpendingAnalytics {
+  periodStart: string | null;
+  periodEnd: string | null;
+  monthEquivalents: number;
+  months: string[];
+  averages: CategoryMonthlyAverage[];
+  series: CategorySpendingSeries[];
+}
+
 export interface DashboardData {
   month: string;
   accounts: BankAccount[];
   categories: Category[];
   transactions: BudgetTransaction[];
   budgetLines: BudgetLine[];
+  categorySpending: CategorySpendingTotal[];
+  spendingAnalytics: SpendingAnalytics;
   balance: number;
   income: number;
   expenses: number;
@@ -75,6 +114,7 @@ export interface DashboardData {
   remainingBudget: number;
   expenseDelta: number | null;
   lastSyncedAt: string | null;
+  syncStatus: BankSyncStatus;
   connection: {
     id: string;
     status: string;

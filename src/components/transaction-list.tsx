@@ -31,7 +31,14 @@ export function TransactionList({ transactions, categories, accounts }: { transa
     <div className="transaction-table card">
       {filtered.length ? filtered.map((transaction) => <article className="transaction-row" key={transaction.id}>
         <div className="category-dot" style={{ background: `${transaction.category?.color ?? "#c0c5ce"}20`, color: transaction.category?.color }}><Icon name={transaction.category?.icon ?? "help"}/></div>
-        <div className="transaction-main"><strong>{transaction.counterparty || transaction.description}</strong><span>{formatShortDate(transaction.booked_at)} · {transaction.account?.iban_masked ?? transaction.account?.name ?? "Compte"}{transaction.status === "pending" ? <em>En attente</em> : null}</span></div>
+        <div className="transaction-main">
+          <strong>{transaction.description}</strong>
+          <span>
+            {transaction.counterparty && transaction.counterparty !== transaction.description ? <>{transaction.counterparty} · </> : null}
+            {formatShortDate(transaction.booked_at)} · {transaction.account?.iban_masked ?? transaction.account?.name ?? "Compte"}
+            {transaction.status === "pending" ? <em>En attente</em> : null}
+          </span>
+        </div>
         <select className="category-select" aria-label={`Catégorie de ${transaction.description}`} value={transaction.category_id ?? ""} onChange={(event) => startTransition(() => updateTransactionCategory(transaction.id, event.target.value))}>
           {categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>

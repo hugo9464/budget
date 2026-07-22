@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { findBoursoInstitution } from "./gocardless";
+import { accountTransactionsPath, findBoursoInstitution, parseRateLimitHeaders } from "./gocardless";
 
 describe("sélection dynamique BoursoBank", () => {
   afterEach(() => { vi.unstubAllGlobals(); delete process.env.GOCARDLESS_SANDBOX; });
@@ -16,5 +16,30 @@ describe("sélection dynamique BoursoBank", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(findBoursoInstitution()).resolves.toMatchObject({ name: "BoursoBank" });
     expect(fetchMock.mock.calls[1][0]).toContain("institutions/?country=fr");
+  });
+});
+
+describe("historique de synchronisation", () => {
+  it("demande toutes les opérations depuis le 1er janvier à Paris", () => {
+    const path = accountTransactionsPath("account/id", new Date("2026-07-16T08:00:00Z"));
+    expect(path).toBe("/accounts/account%2Fid/transactions/?date_from=2026-01-01&date_to=2026-07-16");
+  });
+
+  it("utilise déjà la nouvelle année pendant la nuit du réveillon à Paris", () => {
+    const path = accountTransactionsPath("account", new Date("2025-12-31T23:30:00Z"));
+    expect(path).toContain("date_from=2026-01-01&date_to=2026-01-01");
+  });
+});
+
+describe("quota GoCardless", () => {
+  it("lit le quota par compte et convertit le délai de réinitialisation", () => {
+    const headers = new Headers({
+      "X-RateLimit-Account-Success-Remaining": "3",
+      "X-RateLimit-Account-Success-Reset": "3600",
+    });
+    expect(parseRateLimitHeaders(headers, new Date("2026-07-16T12:00:00Z"))).toEqual({
+      remaining: 3,
+      resetAt: "2026-07-16T13:00:00.000Z",
+    });
   });
 });

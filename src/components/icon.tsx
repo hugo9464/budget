@@ -25,6 +25,7 @@ const paths: Record<string, React.ReactNode> = {
   bank: <><path d="m3 10 9-7 9 7M5 10h14M6 10v8m6-8v8m6-8v8M3 21h18"/></>,
   logout: <><path d="M10 4H4v16h6M14 8l4 4-4 4m4-4H8"/></>,
   chevron: <path d="m9 18 6-6-6-6"/>,
+  "arrow-up": <><path d="m12 19V5"/><path d="m6 11 6-6 6 6"/></>,
 };
 
 export function Icon({ name, ...props }: SVGProps<SVGSVGElement> & { name: string }) {

@@ -1,17 +1,40 @@
 import Link from "next/link";
-import { formatCurrency, formatShortDate } from "@/lib/budget";
+import { currentMonth, formatCurrency, formatShortDate } from "@/lib/budget";
 import { getDashboardData } from "@/lib/data";
 import { Icon } from "@/components/icon";
+import { CategorySpendingChart } from "@/components/category-spending-chart";
+import { CategorySpendingView } from "@/components/category-spending-view";
 
 function monthLabel(month: string) {
   return new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "Europe/Paris" }).format(new Date(`${month}-01T12:00:00Z`));
 }
 
+function monthPeriodLabel(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0, 12));
+  const endLabel = new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Europe/Paris",
+  }).format(lastDay);
+  return `Du 1er au ${endLabel}`;
+}
+
+function shiftMonth(month: string, offset: number) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, monthNumber - 1 + offset, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const params = await searchParams;
   const data = await getDashboardData(params.month);
-  const topLines = data.budgetLines.filter((line) => line.spent > 0).slice(0, 5);
-  const maxSpent = Math.max(...topLines.map((line) => line.spent), 1);
+  const spendingSeries = data.spendingAnalytics.series.filter((item) => item.category.kind === "expense");
+  const currentMonthSelected = data.month === currentMonth();
+  const previousMonth = shiftMonth(data.month, -1);
+  const nextMonth = shiftMonth(data.month, 1);
+  const canGoToNextMonth = data.month < currentMonth();
   const budgetProgress = data.totalBudget ? Math.min((data.expenses / data.totalBudget) * 100, 100) : 0;
   return <div className="page dashboard-page">
     <header className="page-header">
@@ -26,16 +49,37 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     <section className="account-summary-grid" aria-label="Comptes connectés">
       {data.accounts.map((account) => <article className="account-summary card" key={account.id}><div><p>{account.name}</p><span>{account.iban_masked ?? account.currency}</span></div><strong>{formatCurrency(account.balance)}</strong></article>)}
     </section>
-    <section className="metric-grid">
-      <article className="metric card"><span className="metric-icon income"><Icon name="arrows"/></span><div><p>Revenus</p><strong>{formatCurrency(data.income)}</strong><small>Ce mois-ci</small></div></article>
-      <article className="metric card"><span className="metric-icon expense"><Icon name="arrows"/></span><div><p>Dépenses</p><strong>{formatCurrency(data.expenses)}</strong><small className={(data.expenseDelta ?? 0) <= 0 ? "good" : "bad"}>{data.expenseDelta === null ? "Pas de comparaison" : `${data.expenseDelta > 0 ? "+" : ""}${data.expenseDelta.toFixed(1)} % vs mois dernier`}</small></div></article>
-      <article className="metric card"><span className="metric-icon savings"><Icon name="piggy"/></span><div><p>Épargne nette</p><strong>{formatCurrency(data.savings)}</strong><small>{data.income ? `${Math.max(0, (data.savings / data.income) * 100).toFixed(0)} % de vos revenus` : "—"}</small></div></article>
-      <article className="metric card budget-metric"><div className="mini-ring" style={{ "--progress": `${budgetProgress * 3.6}deg` } as React.CSSProperties}><span>{budgetProgress.toFixed(0)}%</span></div><div><p>Budget consommé</p><strong>{formatCurrency(data.expenses)}</strong><small>sur {formatCurrency(data.totalBudget)}</small></div></article>
-    </section>
     <section className="dashboard-grid">
-      <article className="card spending-card">
-        <div className="card-heading"><div><p className="eyebrow">RÉPARTITION</p><h2>Vos dépenses</h2></div><Link href="/transactions">Tout voir <Icon name="chevron"/></Link></div>
-        <div className="bar-chart">{topLines.length ? topLines.map((line) => <div className="bar-column" key={line.category.id}><div className="bar-value">{formatCurrency(line.spent)}</div><div className="bar-track"><span style={{ height: `${Math.max(8, line.spent / maxSpent * 100)}%`, background: line.category.color }}/></div><small>{line.category.name}</small></div>) : <div className="empty-state"><p>Aucune dépense comptabilisée.</p></div>}</div>
+      <article className="card category-spending-card">
+        <div className="card-heading"><div><div className="month-stepper"><Link href={`/?month=${previousMonth}`} aria-label={`Afficher ${monthLabel(previousMonth)}`} title={`Mois précédent : ${monthLabel(previousMonth)}`}><Icon name="chevron"/></Link><p className="eyebrow">{currentMonthSelected ? "MOIS EN COURS" : monthLabel(data.month)}</p>{canGoToNextMonth ? <Link href={`/?month=${nextMonth}`} aria-label={`Afficher ${monthLabel(nextMonth)}`} title={`Mois suivant : ${monthLabel(nextMonth)}`}><Icon name="chevron"/></Link> : <span className="month-stepper-disabled" aria-label="Le mois en cours est le plus récent" aria-disabled="true"><Icon name="chevron"/></span>}</div><h2>Dépenses par catégorie</h2></div><Link href="/transactions">Tout voir <Icon name="chevron"/></Link></div>
+        <p className="analytics-period">{monthPeriodLabel(data.month)}</p>
+        <CategorySpendingView items={data.categorySpending.map((item) => ({
+          id: item.category.id,
+          name: item.category.name,
+          color: item.category.color,
+          amount: item.amount,
+          operations: item.transactions.map((transaction) => ({
+            id: transaction.id,
+            label: transaction.counterparty || transaction.description,
+            date: formatShortDate(transaction.booked_at ?? transaction.value_at),
+            amount: Math.abs(transaction.amount),
+          })),
+        }))}>
+          <div className="category-spending-grid">{data.categorySpending.length ? data.categorySpending.map((item) => {
+          const popoverId = `category-operations-${item.category.id}`;
+          return <div className="category-spending-item" key={item.category.id}>
+            <div className="category-spending-row" tabIndex={0} aria-describedby={popoverId}>
+              <span style={{ background: item.category.color }}/>
+              <div className="category-spending-copy"><p>{item.category.name}</p><small>{item.transactions.length} opération{item.transactions.length > 1 ? "s" : ""}</small></div>
+              <strong>{formatCurrency(item.amount)}</strong>
+            </div>
+            <div className="category-spending-popover" id={popoverId} role="tooltip">
+              <div className="category-popover-heading"><div><span style={{ background: item.category.color }}/><strong>{item.category.name}</strong></div><b>{formatCurrency(item.amount)}</b></div>
+              <ul>{item.transactions.map((transaction) => <li key={transaction.id}><div><strong>{transaction.counterparty || transaction.description}</strong><small>{formatShortDate(transaction.booked_at ?? transaction.value_at)}</small></div><b>−{formatCurrency(Math.abs(transaction.amount))}</b></li>)}</ul>
+            </div>
+          </div>;
+          }) : <div className="empty-state"><p>Aucune dépense comptabilisée sur ce mois.</p></div>}</div>
+        </CategorySpendingView>
       </article>
       <article className="card budget-card">
         <div className="card-heading"><div><p className="eyebrow">BUDGET DU MOIS</p><h2>Reste à dépenser</h2></div><Link href="/budgets"><Icon name="chevron"/></Link></div>
@@ -46,6 +90,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <hr/>
         {data.budgetLines.filter((line) => line.budget > 0).slice(0, 3).map((line) => <div className="mini-budget" key={line.category.id}><span style={{ background: line.category.color }}/><p>{line.category.name}</p><strong>{formatCurrency(line.remaining)}</strong></div>)}
       </article>
+    </section>
+    <section className="card trend-card">
+      <div className="card-heading"><div><p className="eyebrow">ÉVOLUTION</p><h2>Dépenses mensuelles par catégorie</h2></div></div>
+      <CategorySpendingChart months={data.spendingAnalytics.months} series={spendingSeries}/>
     </section>
     <section className="card recent-card">
       <div className="card-heading"><div><p className="eyebrow">DERNIÈRES OPÉRATIONS</p><h2>Mouvements récents</h2></div><Link href="/transactions">Toutes les opérations <Icon name="chevron"/></Link></div>

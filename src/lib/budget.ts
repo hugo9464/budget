@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BudgetLine, BudgetTransaction, Category, GoCardlessTransaction, MonthlyBudget } from "./types";
+import type { BudgetLine, BudgetTransaction, Category, CategorySpendingTotal, GoCardlessTransaction, MonthlyBudget, SpendingAnalytics } from "./types";
 
 export function normalizeMerchant(value: string): string {
   return value
@@ -108,6 +108,91 @@ export function buildBudgetLines(
       };
     })
     .sort((a, b) => b.spent - a.spent || a.category.sort_order - b.category.sort_order);
+}
+
+export function buildCategorySpending(
+  categories: Category[],
+  transactions: BudgetTransaction[],
+): CategorySpendingTotal[] {
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const unclassified = categories.find((category) => category.slug === "a-classer") ?? null;
+  const totals = new Map<string, { amount: number; transactions: BudgetTransaction[] }>();
+
+  for (const transaction of transactions) {
+    if (transaction.status !== "booked" || transaction.amount >= 0 || transaction.is_transfer) continue;
+    const assigned = transaction.category_id ? categoryById.get(transaction.category_id) : null;
+    const category = assigned?.kind === "expense" || assigned?.kind === "uncategorized" ? assigned : unclassified;
+    if (!category) continue;
+    const current = totals.get(category.id) ?? { amount: 0, transactions: [] };
+    current.amount += Math.abs(transaction.amount);
+    current.transactions.push(transaction);
+    totals.set(category.id, current);
+  }
+
+  return [...totals]
+    .map(([categoryId, total]) => ({
+      category: categoryById.get(categoryId)!,
+      amount: total.amount,
+      transactions: total.transactions.toSorted((left, right) =>
+        (right.booked_at ?? right.value_at ?? "").localeCompare(left.booked_at ?? left.value_at ?? "")
+        || right.id.localeCompare(left.id),
+      ),
+    }))
+    .toSorted((left, right) => right.amount - left.amount || left.category.sort_order - right.category.sort_order);
+}
+
+export function buildSpendingAnalytics(
+  categories: Category[],
+  transactions: BudgetTransaction[],
+): SpendingAnalytics {
+  const expenses = transactions.filter((transaction) =>
+    transaction.status === "booked"
+    && transaction.amount < 0
+    && !transaction.is_transfer
+    && Boolean(transaction.booked_at),
+  );
+  if (!expenses.length) {
+    return { periodStart: null, periodEnd: null, monthEquivalents: 0, months: [], averages: [], series: [] };
+  }
+
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const dates = expenses.map((transaction) => transaction.booked_at!).toSorted();
+  const periodStart = dates[0];
+  const periodEnd = dates.at(-1)!;
+  const inclusiveDays = Math.round(
+    (Date.parse(`${periodEnd}T00:00:00Z`) - Date.parse(`${periodStart}T00:00:00Z`)) / 86_400_000,
+  ) + 1;
+  const monthEquivalents = Math.max(1, inclusiveDays / 30);
+
+  const months: string[] = [];
+  const cursor = new Date(`${periodStart.slice(0, 7)}-01T00:00:00Z`);
+  const lastMonth = periodEnd.slice(0, 7);
+  while (cursor.toISOString().slice(0, 7) <= lastMonth) {
+    months.push(cursor.toISOString().slice(0, 7));
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  const totals = new Map<string, number>();
+  const monthlyTotals = new Map<string, Map<string, number>>();
+  for (const transaction of expenses) {
+    if (!transaction.category_id || !categoryById.has(transaction.category_id)) continue;
+    const amount = Math.abs(transaction.amount);
+    const month = transaction.booked_at!.slice(0, 7);
+    totals.set(transaction.category_id, (totals.get(transaction.category_id) ?? 0) + amount);
+    const categoryMonths = monthlyTotals.get(transaction.category_id) ?? new Map<string, number>();
+    categoryMonths.set(month, (categoryMonths.get(month) ?? 0) + amount);
+    monthlyTotals.set(transaction.category_id, categoryMonths);
+  }
+
+  const averages = [...totals]
+    .map(([categoryId, total]) => ({ category: categoryById.get(categoryId)!, total, amount: total / monthEquivalents }))
+    .toSorted((left, right) => right.amount - left.amount);
+  const series = averages.map(({ category, total }) => ({
+    category,
+    total,
+    values: months.map((month) => monthlyTotals.get(category.id)?.get(month) ?? 0),
+  }));
+  return { periodStart, periodEnd, monthEquivalents, months, averages, series };
 }
 
 export function monthBounds(month: string): { start: string; end: string; previousStart: string; previousEnd: string } {

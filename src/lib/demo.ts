@@ -1,4 +1,4 @@
-import { buildBudgetLines, currentMonth } from "./budget";
+import { buildBudgetLines, buildCategorySpending, buildSpendingAnalytics, currentMonth } from "./budget";
 import type { BankAccount, BudgetTransaction, Category, DashboardData, MonthlyBudget } from "./types";
 
 export const demoCategories: Category[] = [
@@ -15,7 +15,6 @@ export const demoCategories: Category[] = [
   ["epargne", "Épargne", "#1AA277", "piggy", "expense"],
   ["revenus", "Revenus", "#18A66C", "wallet", "income"],
   ["transferts", "Transferts", "#8C93A1", "arrows", "transfer"],
-  ["autres", "Autres", "#79808D", "dots", "expense"],
   ["a-classer", "À classer", "#C0C5CE", "help", "uncategorized"],
 ].map(([slug, name, color, icon, kind], index) => ({
   id: `demo-${slug}`,
@@ -37,6 +36,10 @@ const account: BankAccount = {
   balance: 3842.56,
   available_balance: 3714.36,
   last_synced_at: new Date().toISOString(),
+  balance_quota_remaining: 4,
+  balance_quota_reset_at: new Date(Date.now() + 24 * 86_400_000).toISOString(),
+  transaction_quota_remaining: 4,
+  transaction_quota_reset_at: new Date(Date.now() + 24 * 86_400_000).toISOString(),
 };
 
 function demoDate(day: number): string {
@@ -90,8 +93,9 @@ export function demoDashboard(month = currentMonth()): DashboardData {
     month: `${month}-01`,
     amount: Number(amount),
   }));
-  const budgetLines = buildBudgetLines(demoCategories, budgets, demoTransactions);
-  const booked = demoTransactions.filter((transaction) => transaction.status === "booked" && !transaction.is_transfer);
+  const monthTransactions = demoTransactions.filter((transaction) => transaction.booked_at?.startsWith(month));
+  const budgetLines = buildBudgetLines(demoCategories, budgets, monthTransactions);
+  const booked = monthTransactions.filter((transaction) => transaction.status === "booked" && !transaction.is_transfer);
   const income = booked.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
   const expenses = booked.filter((item) => item.amount < 0).reduce((sum, item) => sum + Math.abs(item.amount), 0);
   const totalBudget = budgetLines.reduce((sum, line) => sum + line.budget, 0);
@@ -99,8 +103,10 @@ export function demoDashboard(month = currentMonth()): DashboardData {
     month,
     accounts: [account],
     categories: demoCategories,
-    transactions: demoTransactions,
+    transactions: monthTransactions,
     budgetLines,
+    categorySpending: buildCategorySpending(demoCategories, monthTransactions),
+    spendingAnalytics: buildSpendingAnalytics(demoCategories, demoTransactions),
     balance: account.balance,
     income,
     expenses,
@@ -109,6 +115,11 @@ export function demoDashboard(month = currentMonth()): DashboardData {
     remainingBudget: totalBudget - expenses,
     expenseDelta: -8.4,
     lastSyncedAt: account.last_synced_at,
+    syncStatus: {
+      lastSyncedAt: account.last_synced_at,
+      quotaRemaining: 4,
+      quotaResetAt: null,
+    },
     connection: {
       id: "demo-connection",
       status: "linked",

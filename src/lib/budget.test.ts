@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBudgetLines,
+  buildCategorySpending,
+  buildSpendingAnalytics,
   detectTransfers,
   normalizeMerchant,
   pendingMatchFingerprint,
@@ -39,5 +41,39 @@ describe("transferts et budgets", () => {
       transaction({ amount: -35 }), transaction({ amount: -20, status: "pending" }), transaction({ amount: -40, is_transfer: true }),
     ]);
     expect(lines[0]).toMatchObject({ budget: 100, spent: 35, remaining: 65, progress: 35 });
+  });
+  it("additionne les dépenses comptabilisées par catégorie", () => {
+    const unclassified: Category = { ...category, id: "unknown", slug: "a-classer", name: "À classer", kind: "uncategorized", sort_order: 2 };
+    const spending = buildCategorySpending([category, unclassified], [
+      transaction({ amount: -35 }),
+      transaction({ amount: -15, booked_at: "2026-07-11" }),
+      transaction({ amount: -20, category_id: null }),
+      transaction({ amount: -40, status: "pending" }),
+      transaction({ amount: -50, is_transfer: true }),
+    ]);
+    expect(spending.map(({ category: itemCategory, amount, transactions }) => ({
+      category: itemCategory,
+      amount,
+      transactionAmounts: transactions.map((item) => item.amount),
+    }))).toEqual([
+      { category, amount: 50, transactionAmounts: [-15, -35] },
+      { category: unclassified, amount: 20, transactionAmounts: [-20] },
+    ]);
+  });
+  it("calcule les moyennes mensuelles et les séries par catégorie", () => {
+    const analytics = buildSpendingAnalytics([category], [
+      transaction({ booked_at: "2026-04-17", amount: -300 }),
+      transaction({ booked_at: "2026-05-10", amount: -600 }),
+      transaction({ booked_at: "2026-07-15", amount: -900 }),
+      transaction({ booked_at: "2026-06-10", amount: -500, is_transfer: true }),
+    ]);
+    expect(analytics).toMatchObject({
+      periodStart: "2026-04-17",
+      periodEnd: "2026-07-15",
+      monthEquivalents: 3,
+      months: ["2026-04", "2026-05", "2026-06", "2026-07"],
+    });
+    expect(analytics.averages[0]).toMatchObject({ amount: 600, total: 1800 });
+    expect(analytics.series[0].values).toEqual([300, 600, 0, 900]);
   });
 });
