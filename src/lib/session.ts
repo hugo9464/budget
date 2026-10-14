@@ -3,10 +3,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
-import bcrypt from "bcryptjs";
-import { isDemoMode, requireEnv } from "./env";
+import { isDemoMode } from "./env";
 import { getSupabaseAdmin } from "./supabase/admin";
+import { createClient } from "./supabase/server";
 
+/** Cookie de session du seul mode démo ; en production la session est celle de Supabase Auth. */
 export const SESSION_COOKIE = "budget_session";
 const THIRTY_DAYS = 30 * 24 * 60 * 60;
 const TWO_HOURS = 2 * 60 * 60;
@@ -15,8 +16,8 @@ function secret(): Uint8Array {
   return new TextEncoder().encode(process.env.SESSION_SECRET || "demo-session-secret-change-me");
 }
 
-export async function createSessionToken(email: string): Promise<string> {
-  return new SignJWT({ scope: "budget:owner", email })
+export async function createSessionToken(): Promise<string> {
+  return new SignJWT({ scope: "budget:owner" })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${THIRTY_DAYS}s`)
@@ -43,6 +44,11 @@ export async function verifyBankCallbackToken(token: string, connectionId: strin
 }
 
 export async function hasValidSession(): Promise<boolean> {
+  if (!isDemoMode()) {
+    // getClaims vérifie la signature du JWT ; ne pas utiliser getSession pour autoriser.
+    const { data, error } = await (await createClient()).auth.getClaims();
+    return !error && Boolean(data?.claims?.sub);
+  }
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return false;
   try {
@@ -87,32 +93,18 @@ export async function recordLoginAttempt(ipHash: string, succeeded: boolean): Pr
 
 export const DEMO_PASSWORD = "demo1234";
 
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
+/** Connecte l'utilisateur via Supabase Auth (cookies écrits par le client SSR). */
+export async function signIn(email: string, password: string): Promise<boolean> {
+  if (!email || !password) return false;
+  if (isDemoMode()) {
+    const expected = Buffer.from(DEMO_PASSWORD);
+    const supplied = Buffer.from(password);
+    return email.includes("@") && supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  }
+  const { error } = await (await createClient()).auth.signInWithPassword({ email: email.trim(), password });
+  return !error;
 }
 
-function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-/**
- * Vérifie l'email et le mot de passe du propriétaire (AUTH_EMAIL / AUTH_PASSWORD_HASH).
- * En mode démo sans configuration : n'importe quel email avec le mot de passe « demo1234 ».
- */
-export async function verifyCredentials(email: string, password: string): Promise<boolean> {
-  if (!password || password.length > 200) return false;
-  const configuredEmail = process.env.AUTH_EMAIL;
-  const configuredHash = process.env.AUTH_PASSWORD_HASH;
-  if (configuredEmail && configuredHash) {
-    // Le hash est toujours comparé pour garder un temps de réponse constant.
-    const passwordOk = await bcrypt.compare(password, configuredHash);
-    return safeEqual(normalizeEmail(email), normalizeEmail(configuredEmail)) && passwordOk;
-  }
-  if (!isDemoMode()) {
-    requireEnv("AUTH_EMAIL");
-    requireEnv("AUTH_PASSWORD_HASH");
-  }
-  return email.includes("@") && safeEqual(password, DEMO_PASSWORD);
+export async function signOut(): Promise<void> {
+  if (!isDemoMode()) await (await createClient()).auth.signOut();
 }

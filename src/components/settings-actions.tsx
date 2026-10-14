@@ -60,5 +60,5 @@ export function AiCategorizationActions({ configured, pending, model }: { config
 
 export function LogoutButton() {
   const router = useRouter();
-  return <button className="danger-button" onClick={async () => { await fetch("/api/session", { method: "DELETE" }); router.replace("/unlock"); router.refresh(); }}><Icon name="logout"/>Verrouiller l’application</button>;
+  return <button className="danger-button" onClick={async () => { await fetch("/api/session", { method: "DELETE" }); router.replace("/unlock"); router.refresh(); }}><Icon name="logout"/>Se déconnecter</button>;
 }

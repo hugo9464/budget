@@ -7,3 +7,7 @@ extra_search_path = ["public", "extensions"]
 
 [db]
 major_version = 17
+
+[auth]
+# Application mono-utilisateur : le compte est créé à la main.
+enable_signup = false

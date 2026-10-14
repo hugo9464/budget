@@ -1,9 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
-/** Rafraîchit les cookies Supabase sans remplacer la session applicative. */
+/** Rafraîchit les cookies de session Supabase Auth à chaque navigation. */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
+  // Mode démo : pas de projet Supabase configuré.
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) return response;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
