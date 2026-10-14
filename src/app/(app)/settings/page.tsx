@@ -1,15 +1,19 @@
 import type { Metadata } from "next";
 import { AiCategorizationActions, BankActions, LogoutButton } from "@/components/settings-actions";
 import { Icon } from "@/components/icon";
+import { PasskeySettings } from "@/components/passkey-actions";
 import { getAiCategorizationStatus } from "@/lib/ai-categorization";
 import { formatCurrency } from "@/lib/budget";
 import { getDashboardData } from "@/lib/data";
+import { listPasskeys } from "@/lib/passkeys";
+import { currentUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Réglages" };
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ bank?: string; connected?: string }> }) {
   const params = await searchParams;
-  const [data, ai] = await Promise.all([getDashboardData(), getAiCategorizationStatus()]);
+  const [data, ai, user] = await Promise.all([getDashboardData(), getAiCategorizationStatus(), currentUser()]);
+  const passkeys = user ? await listPasskeys(user.id) : [];
   const connected = data.connection?.status === "linked";
   return <div className="page settings-page"><header className="page-header"><div><p className="eyebrow">CONFIGURATION</p><h1>Réglages</h1><p className="muted">Gérez votre banque, la synchronisation et la sécurité.</p></div></header>
     {params.bank === "connected" || params.connected === "demo" ? <div className="success-banner">BoursoBank est connecté. Vos opérations sont à jour.</div> : null}
@@ -20,6 +24,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {data.connection?.error_message ? <p className="form-error">{data.connection.error_message}</p> : null}<BankActions connected={connected} demo={data.demo} syncBlocked={data.syncStatus.quotaRemaining === 0 && Boolean(data.syncStatus.quotaResetAt)}/></div></section>
     <section className="settings-section card"><div className="settings-icon"><Icon name="sparkles"/></div><div className="settings-copy"><p className="eyebrow">CATÉGORISATION OPENAI</p><h2>Classement intelligent des opérations</h2><p className="muted">Les corrections manuelles, règles et heuristiques restent prioritaires. OpenAI analyse uniquement les {ai.pending} opération(s) encore inconnue(s), avec un libellé nettoyé et le sens revenu/dépense.</p><div className="connection-meta"><span className={`connection-status ${ai.configured ? "ok" : ""}`}><i/>{ai.configured ? "Clé API configurée" : "Clé API requise"}</span><span>Modèle économique adapté aux classements en volume</span></div><div className="privacy-pills"><span>IBAN et numéros supprimés</span><span>Aucun solde transmis</span><span>Corrections mémorisées</span></div><AiCategorizationActions configured={ai.configured} pending={ai.pending} model={ai.model}/>{!ai.configured ? <p className="inline-message">Créez une clé sur votre compte API OpenAI, puis ajoutez-la comme variable serveur <code>OPENAI_API_KEY</code> dans <code>.env.local</code> et Vercel. Ne la collez jamais dans l’interface.</p> : null}</div></section>
     <section className="settings-section card"><div className="settings-icon"><Icon name="lock"/></div><div className="settings-copy"><p className="eyebrow">SÉCURITÉ</p><h2>Connexion et session privée</h2><p className="muted">Connexion via Supabase Auth, session conservée dans un cookie sécurisé. Déconnectez-vous l’application immédiatement sur un appareil partagé.</p><LogoutButton/></div></section>
+    {user ? <section className="settings-section card"><div className="settings-icon"><Icon name="fingerprint"/></div><div className="settings-copy"><p className="eyebrow">TOUCH ID</p><h2>Connexion par empreinte</h2><p className="muted">Enregistrez une passkey sur ce Mac (Touch ID) ou cet iPhone (Face ID) pour vous connecter sans mot de passe. Synchronisée par le trousseau iCloud ; le mot de passe reste disponible en secours.</p><PasskeySettings passkeys={passkeys}/></div></section> : null}
     <section className="about-card"><span className="brand-mark">M</span><div><strong>Mon budget</strong><p>Version 0.1.0 · PWA personnelle</p></div></section>
   </div>;
 }

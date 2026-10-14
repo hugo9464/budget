@@ -43,6 +43,10 @@ openssl rand -base64 48
 
 La clé Supabase secrète ne doit jamais porter le préfixe `NEXT_PUBLIC_`. Les tables ont RLS activé, aucun accès `anon`/`authenticated`, et ne sont manipulées que par les routes serveur après validation de la session. La connexion utilise Supabase Auth (email + mot de passe) ; la session est gérée par les cookies `@supabase/ssr` et vérifiée côté serveur avec `getClaims`.
 
+## Connexion Touch ID / Face ID (passkeys)
+
+Appliquez `supabase/migrations/20261014120000_passkeys.sql`. Une fois connecté avec le mot de passe, ouvrez **Réglages → Touch ID** puis « Activer Touch ID sur cet appareil ». La page de connexion propose ensuite « Se connecter avec Touch ID ». La signature WebAuthn est vérifiée côté serveur (`@simplewebauthn/server`), puis une session Supabase Auth classique est ouverte via un lien magique généré et consommé côté serveur (aucun email envoyé). Une passkey est liée au domaine sur lequel elle a été créée.
+
 ## Vérifications
 
 ```bash
