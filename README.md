@@ -12,26 +12,27 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Le mode démo est activé par défaut. Ouvrez `http://localhost:3000`, saisissez n’importe quelle adresse email puis le code `123456`. Le mode démo n’appelle ni Supabase, ni GoCardless, ni OpenAI.
+Le mode démo est activé par défaut. Ouvrez `http://localhost:3000`, connectez-vous avec n’importe quelle adresse email et le mot de passe `demo1234`. Le mode démo n’appelle ni Supabase, ni GoCardless, ni OpenAI.
 
 ## Configuration de production
 
 1. Créez un projet Supabase récent et appliquez `supabase/migrations/20260712000000_initial_budget_schema.sql` avec le CLI Supabase ou le SQL Editor.
 2. Créez un compte dans le portail **GoCardless Bank Account Data**, puis récupérez `secret_id` et `secret_key`.
 3. Créez une clé API OpenAI avec une limite de dépense adaptée.
-4. Activez la connexion par code email dans Supabase : **Authentication → Sign In / Providers → Email** activé, puis **Authentication → Emails → Magic Link**, remplacez le contenu par celui de `supabase/templates/magic_link.html` (il doit contenir `{{ .Token }}` pour envoyer un code plutôt qu’un lien). Pour plus de quelques emails par heure, configurez un SMTP personnalisé (Resend, Brevo…).
-5. Générez un secret de session :
+4. Générez le hash de votre mot de passe et un secret de session :
 
 ```bash
+node scripts/hash-password.mjs 'votre mot de passe'
 openssl rand -base64 48
 ```
 
-6. Configurez les variables Vercel suivantes :
+5. Configurez les variables Vercel suivantes :
 
 | Variable | Utilisation |
 | --- | --- |
 | `DEMO_MODE=false` | Active les données réelles |
-| `ALLOWED_EMAILS` | Adresse(s) autorisée(s) à recevoir un code, séparées par des virgules |
+| `AUTH_EMAIL` | Adresse email de connexion |
+| `AUTH_PASSWORD_HASH` | Hash bcrypt généré ci-dessus |
 | `SESSION_SECRET` | Secret aléatoire de signature des cookies |
 | `NEXT_PUBLIC_APP_URL` | URL HTTPS publique, sans slash final |
 | `SUPABASE_URL` | URL du projet Supabase |
@@ -41,7 +42,7 @@ openssl rand -base64 48
 | `OPENAI_API_KEY` | Catégorisation des seuls libellés inconnus |
 | `OPENAI_MODEL=gpt-5.4-nano` | Modèle de classification |
 
-La clé Supabase secrète ne doit jamais porter le préfixe `NEXT_PUBLIC_`. Les tables ont RLS activé, aucun accès `anon`/`authenticated`, et ne sont manipulées que par les routes serveur après validation de la session. Seules les adresses de `ALLOWED_EMAILS` reçoivent un code ; la vérification est faite par Supabase Auth, puis l’application émet son propre cookie de session signé (30 jours).
+La clé Supabase secrète ne doit jamais porter le préfixe `NEXT_PUBLIC_`. Les tables ont RLS activé, aucun accès `anon`/`authenticated`, et ne sont manipulées que par les routes serveur après validation de la session. La connexion se fait par email et mot de passe (`AUTH_EMAIL` / `AUTH_PASSWORD_HASH`), puis l’application émet un cookie de session signé valable 30 jours.
 
 ## Vérifications
 

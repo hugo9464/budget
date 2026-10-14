@@ -1,9 +1,9 @@
 import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
+import bcrypt from "bcryptjs";
 import { isDemoMode, requireEnv } from "./env";
 import { getSupabaseAdmin } from "./supabase/admin";
 
@@ -77,7 +77,7 @@ export async function checkRateLimit(ipHash: string): Promise<{ allowed: boolean
     .eq("succeeded", false)
     .gte("attempted_at", cutoff);
   if (error) throw error;
-  return { allowed: (count ?? 0) < 10, retryAfter: (count ?? 0) < 10 ? 0 : 900 };
+  return { allowed: (count ?? 0) < 5, retryAfter: (count ?? 0) < 5 ? 0 : 900 };
 }
 
 export async function recordLoginAttempt(ipHash: string, succeeded: boolean): Promise<void> {
@@ -85,54 +85,34 @@ export async function recordLoginAttempt(ipHash: string, succeeded: boolean): Pr
   await getSupabaseAdmin().from("login_attempts").insert({ ip_hash: ipHash, succeeded });
 }
 
-export const DEMO_EMAIL_CODE = "123456";
+export const DEMO_PASSWORD = "demo1234";
 
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-export function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
-}
-
-/** Liste blanche des adresses autorisées (variable ALLOWED_EMAILS, séparées par des virgules). */
-export function isAllowedEmail(email: string): boolean {
-  const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
-    .map(normalizeEmail)
-    .filter(Boolean);
-  if (!allowed.length) return isDemoMode();
-  return allowed.includes(normalizeEmail(email));
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 /**
- * Client Supabase dédié à l'authentification, recréé à chaque appel :
- * verifyOtp mémorise la session de l'utilisateur dans le client, ce qui
- * remplacerait la clé secrète du client admin partagé.
+ * Vérifie l'email et le mot de passe du propriétaire (AUTH_EMAIL / AUTH_PASSWORD_HASH).
+ * En mode démo sans configuration : n'importe quel email avec le mot de passe « demo1234 ».
  */
-function authClient() {
-  return createClient(requireEnv("SUPABASE_URL"), requireEnv("SUPABASE_SECRET_KEY"), {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
-}
-
-/** Envoie un code à usage unique par email. Les adresses non autorisées sont ignorées silencieusement. */
-export async function sendEmailCode(email: string): Promise<void> {
-  if (!isAllowedEmail(email) || isDemoMode()) return;
-  const { error } = await authClient().auth.signInWithOtp({
-    email: normalizeEmail(email),
-    options: { shouldCreateUser: true },
-  });
-  if (error) throw error;
-}
-
-export async function verifyEmailCode(email: string, code: string): Promise<boolean> {
-  if (!/^\d{6,10}$/.test(code) || !isAllowedEmail(email)) return false;
-  if (isDemoMode()) {
-    const expected = Buffer.from(DEMO_EMAIL_CODE);
-    const supplied = Buffer.from(code);
-    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+export async function verifyCredentials(email: string, password: string): Promise<boolean> {
+  if (!password || password.length > 200) return false;
+  const configuredEmail = process.env.AUTH_EMAIL;
+  const configuredHash = process.env.AUTH_PASSWORD_HASH;
+  if (configuredEmail && configuredHash) {
+    // Le hash est toujours comparé pour garder un temps de réponse constant.
+    const passwordOk = await bcrypt.compare(password, configuredHash);
+    return safeEqual(normalizeEmail(email), normalizeEmail(configuredEmail)) && passwordOk;
   }
-  const { data, error } = await authClient().auth.verifyOtp({ email: normalizeEmail(email), token: code, type: "email" });
-  return !error && normalizeEmail(data.user?.email ?? "") === normalizeEmail(email);
+  if (!isDemoMode()) {
+    requireEnv("AUTH_EMAIL");
+    requireEnv("AUTH_PASSWORD_HASH");
+  }
+  return email.includes("@") && safeEqual(password, DEMO_PASSWORD);
 }

@@ -6,7 +6,7 @@ import {
   createSessionToken,
   normalizeEmail,
   recordLoginAttempt,
-  verifyEmailCode,
+  verifyCredentials,
 } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
@@ -17,9 +17,9 @@ export async function POST(request: NextRequest) {
   }
   const body = await request.json().catch(() => ({}));
   const email = String(body.email ?? "");
-  const valid = await verifyEmailCode(email, String(body.code ?? ""));
+  const valid = await verifyCredentials(email, String(body.password ?? ""));
   await recordLoginAttempt(ipHash, valid);
-  if (!valid) return NextResponse.json({ error: "Code incorrect ou expiré" }, { status: 401 });
+  if (!valid) return NextResponse.json({ error: "Email ou mot de passe incorrect" }, { status: 401 });
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set(SESSION_COOKIE, await createSessionToken(normalizeEmail(email)), {
