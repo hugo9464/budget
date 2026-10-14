@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   experimental: {
     typedEnv: true,
+    // Réutilise les pages déjà visitées pendant 30 s : navigation instantanée.
+    // Les actions qui modifient les données appellent revalidatePath / router.refresh.
+    staleTimes: { dynamic: 30 },
   },
   async headers() {
     return [

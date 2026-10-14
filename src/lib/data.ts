@@ -49,24 +49,29 @@ async function getYearlyExpenseTransactions(
   return transactions;
 }
 
+/** Connexions actives et leurs comptes, en un seul aller-retour (dédupliqué par requête). */
 const getLinkedBankContext = cache(async () => {
   const supabase = getSupabaseAdmin();
-  const { data: connections, error: connectionsError } = await supabase
-    .from("bank_connections")
-    .select("*")
-    .eq("status", "linked")
-    .order("created_at", { ascending: false });
-  if (connectionsError) throw connectionsError;
-
-  const connectionIds = (connections ?? []).map((connection) => connection.id);
-  if (!connectionIds.length) return { connections: [], accounts: [] };
-  const { data: accounts, error: accountsError } = await supabase
-    .from("bank_accounts")
-    .select("*")
-    .in("connection_id", connectionIds)
-    .order("created_at");
-  if (accountsError) throw accountsError;
-  return { connections: connections ?? [], accounts: accounts ?? [] };
+  const [connectionsResult, accountsResult] = await Promise.all([
+    supabase
+      .from("bank_connections")
+      .select("*")
+      .eq("status", "linked")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("bank_accounts")
+      .select("*, connection:bank_connections!inner(status)")
+      .eq("connection.status", "linked")
+      .order("created_at"),
+  ]);
+  if (connectionsResult.error) throw connectionsResult.error;
+  if (accountsResult.error) throw accountsResult.error;
+  // La jointure ne sert qu'au filtre sur le statut de la connexion.
+  const accounts = (accountsResult.data ?? []).map(({ connection, ...account }) => {
+    void connection;
+    return account;
+  });
+  return { connections: connectionsResult.data ?? [], accounts };
 });
 
 function syncStatusWithExistingRateLimit(status: BankSyncStatus, connections: Array<{ error_message?: string | null }>): BankSyncStatus {
@@ -169,6 +174,24 @@ export async function getDashboardData(month = currentMonth()): Promise<Dashboar
     lastSyncedAt: latestSync,
     syncStatus: syncStatusWithExistingRateLimit(buildBankSyncStatus(accounts), connections),
     connection: connections[0] ?? null,
+    demo: false,
+  };
+}
+
+/** Données légères de la page Réglages (sans l'analyse annuelle du tableau de bord). */
+export async function getSettingsData(): Promise<Pick<DashboardData, "accounts" | "connection" | "syncStatus" | "demo">> {
+  if (isDemoMode()) {
+    const { accounts, connection, syncStatus } = demoDashboard();
+    return { accounts, connection, syncStatus, demo: true };
+  }
+  const { connections, accounts: rows } = await getLinkedBankContext();
+  const accounts = rows.map((item) =>
+    numeric(item as BankAccount & Record<string, unknown>, ["balance", "available_balance", "balance_quota_remaining", "transaction_quota_remaining"]),
+  ) as BankAccount[];
+  return {
+    accounts,
+    connection: connections[0] ?? null,
+    syncStatus: syncStatusWithExistingRateLimit(buildBankSyncStatus(accounts), connections),
     demo: false,
   };
 }

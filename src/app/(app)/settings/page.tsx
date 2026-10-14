@@ -4,7 +4,7 @@ import { Icon } from "@/components/icon";
 import { PasskeySettings } from "@/components/passkey-actions";
 import { getAiCategorizationStatus } from "@/lib/ai-categorization";
 import { formatCurrency } from "@/lib/budget";
-import { getDashboardData } from "@/lib/data";
+import { getSettingsData } from "@/lib/data";
 import { listPasskeys } from "@/lib/passkeys";
 import { currentUser } from "@/lib/session";
 
@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Réglages" };
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ bank?: string; connected?: string }> }) {
   const params = await searchParams;
-  const [data, ai, user] = await Promise.all([getDashboardData(), getAiCategorizationStatus(), currentUser()]);
+  const [data, ai, user] = await Promise.all([getSettingsData(), getAiCategorizationStatus(), currentUser()]);
   const passkeys = user ? await listPasskeys(user.id) : [];
   const connected = data.connection?.status === "linked";
   return <div className="page settings-page"><header className="page-header"><div><p className="eyebrow">CONFIGURATION</p><h1>Réglages</h1><p className="muted">Gérez votre banque, la synchronisation et la sécurité.</p></div></header>
