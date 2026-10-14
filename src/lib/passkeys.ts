@@ -1,5 +1,5 @@
 import "server-only";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import {
   generateAuthenticationOptions,
@@ -10,6 +10,7 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { isoBase64URL, isoUint8Array } from "@simplewebauthn/server/helpers";
+import { requestOrigin } from "./origin";
 import { getSupabaseAdmin } from "./supabase/admin";
 import { createClient } from "./supabase/server";
 
@@ -31,11 +32,7 @@ type StoredPasskey = {
  * navigateur au domaine sur lequel elle a été créée (production, preview ou local).
  */
 async function relyingParty(): Promise<{ origin: string; rpID: string }> {
-  const headerStore = await headers();
-  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host");
-  if (!host) throw new Error("Hôte de la requête introuvable");
-  const proto = headerStore.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const url = new URL(`${proto}://${host}`);
+  const url = await requestOrigin();
   return { origin: url.origin, rpID: url.hostname };
 }
 

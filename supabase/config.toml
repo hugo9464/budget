@@ -11,3 +11,5 @@ major_version = 17
 [auth]
 # Application mono-utilisateur : le compte est créé à la main.
 enable_signup = false
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/confirm"]

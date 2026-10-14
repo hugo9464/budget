@@ -4,6 +4,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
 import { isDemoMode } from "./env";
+import { requestOrigin } from "./origin";
 import { getSupabaseAdmin } from "./supabase/admin";
 import { createClient } from "./supabase/server";
 
@@ -116,4 +117,26 @@ export async function signIn(email: string, password: string): Promise<boolean> 
 
 export async function signOut(): Promise<void> {
   if (!isDemoMode()) await (await createClient()).auth.signOut();
+}
+
+/**
+ * Envoie l'email de réinitialisation Supabase. Le lien revient sur /auth/confirm,
+ * qui ouvre une session de récupération puis redirige vers /reset-password.
+ */
+export async function sendPasswordReset(email: string): Promise<void> {
+  if (isDemoMode()) return;
+  const redirectTo = new URL("/auth/confirm?next=/reset-password", await requestOrigin()).toString();
+  const { error } = await (await createClient()).auth.resetPasswordForEmail(email.trim(), { redirectTo });
+  // Ne révèle pas si l'adresse existe ; seules les erreurs techniques remontent.
+  if (error && error.status !== 400 && error.status !== 404) throw error;
+}
+
+export async function updatePassword(password: string): Promise<string | null> {
+  if (isDemoMode()) return "Indisponible en mode démo";
+  const { error } = await (await createClient()).auth.updateUser({ password });
+  if (!error) return null;
+  if (error.code === "same_password") return "Choisissez un mot de passe différent de l’actuel.";
+  if (error.code === "weak_password") return "Mot de passe trop faible.";
+  if (error.code === "reauthentication_needed") return "Session trop ancienne : utilisez « Mot de passe oublié » pour recevoir un lien.";
+  return "Impossible de modifier le mot de passe.";
 }
