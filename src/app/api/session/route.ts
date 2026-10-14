@@ -4,8 +4,9 @@ import {
   checkRateLimit,
   clientIpHash,
   createSessionToken,
+  normalizeEmail,
   recordLoginAttempt,
-  verifyPin,
+  verifyEmailCode,
 } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
@@ -15,12 +16,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Trop de tentatives. Réessayez dans 15 minutes." }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
   }
   const body = await request.json().catch(() => ({}));
-  const valid = await verifyPin(String(body.pin ?? ""));
+  const email = String(body.email ?? "");
+  const valid = await verifyEmailCode(email, String(body.code ?? ""));
   await recordLoginAttempt(ipHash, valid);
-  if (!valid) return NextResponse.json({ error: "Code incorrect" }, { status: 401 });
+  if (!valid) return NextResponse.json({ error: "Code incorrect ou expiré" }, { status: 401 });
 
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(SESSION_COOKIE, await createSessionToken(), {
+  response.cookies.set(SESSION_COOKIE, await createSessionToken(normalizeEmail(email)), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",

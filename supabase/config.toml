@@ -7,3 +7,7 @@ extra_search_path = ["public", "extensions"]
 
 [db]
 major_version = 17
+
+[auth.email.template.magic_link]
+subject = "Votre code Mon budget"
+content_path = "./supabase/templates/magic_link.html"

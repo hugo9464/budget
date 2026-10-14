@@ -1,9 +1,9 @@
 import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
-import bcrypt from "bcryptjs";
 import { isDemoMode, requireEnv } from "./env";
 import { getSupabaseAdmin } from "./supabase/admin";
 
@@ -15,8 +15,8 @@ function secret(): Uint8Array {
   return new TextEncoder().encode(process.env.SESSION_SECRET || "demo-session-secret-change-me");
 }
 
-export async function createSessionToken(): Promise<string> {
-  return new SignJWT({ scope: "budget:owner" })
+export async function createSessionToken(email: string): Promise<string> {
+  return new SignJWT({ scope: "budget:owner", email })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${THIRTY_DAYS}s`)
@@ -77,7 +77,7 @@ export async function checkRateLimit(ipHash: string): Promise<{ allowed: boolean
     .eq("succeeded", false)
     .gte("attempted_at", cutoff);
   if (error) throw error;
-  return { allowed: (count ?? 0) < 5, retryAfter: (count ?? 0) < 5 ? 0 : 900 };
+  return { allowed: (count ?? 0) < 10, retryAfter: (count ?? 0) < 10 ? 0 : 900 };
 }
 
 export async function recordLoginAttempt(ipHash: string, succeeded: boolean): Promise<void> {
@@ -85,12 +85,54 @@ export async function recordLoginAttempt(ipHash: string, succeeded: boolean): Pr
   await getSupabaseAdmin().from("login_attempts").insert({ ip_hash: ipHash, succeeded });
 }
 
-export async function verifyPin(pin: string): Promise<boolean> {
-  if (!/^\d{4,8}$/.test(pin)) return false;
-  const configuredHash = process.env.APP_PIN_HASH;
-  if (configuredHash) return bcrypt.compare(pin, configuredHash);
-  if (!isDemoMode()) requireEnv("APP_PIN_HASH");
-  const expected = Buffer.from("1234");
-  const supplied = Buffer.from(pin);
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+export const DEMO_EMAIL_CODE = "123456";
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
+}
+
+/** Liste blanche des adresses autorisées (variable ALLOWED_EMAILS, séparées par des virgules). */
+export function isAllowedEmail(email: string): boolean {
+  const allowed = (process.env.ALLOWED_EMAILS ?? "")
+    .split(",")
+    .map(normalizeEmail)
+    .filter(Boolean);
+  if (!allowed.length) return isDemoMode();
+  return allowed.includes(normalizeEmail(email));
+}
+
+/**
+ * Client Supabase dédié à l'authentification, recréé à chaque appel :
+ * verifyOtp mémorise la session de l'utilisateur dans le client, ce qui
+ * remplacerait la clé secrète du client admin partagé.
+ */
+function authClient() {
+  return createClient(requireEnv("SUPABASE_URL"), requireEnv("SUPABASE_SECRET_KEY"), {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
+/** Envoie un code à usage unique par email. Les adresses non autorisées sont ignorées silencieusement. */
+export async function sendEmailCode(email: string): Promise<void> {
+  if (!isAllowedEmail(email) || isDemoMode()) return;
+  const { error } = await authClient().auth.signInWithOtp({
+    email: normalizeEmail(email),
+    options: { shouldCreateUser: true },
+  });
+  if (error) throw error;
+}
+
+export async function verifyEmailCode(email: string, code: string): Promise<boolean> {
+  if (!/^\d{6,10}$/.test(code) || !isAllowedEmail(email)) return false;
+  if (isDemoMode()) {
+    const expected = Buffer.from(DEMO_EMAIL_CODE);
+    const supplied = Buffer.from(code);
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  }
+  const { data, error } = await authClient().auth.verifyOtp({ email: normalizeEmail(email), token: code, type: "email" });
+  return !error && normalizeEmail(data.user?.email ?? "") === normalizeEmail(email);
 }

@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
-/** Rafraîchit les cookies Supabase sans remplacer la protection PIN. */
+/** Rafraîchit les cookies Supabase sans remplacer la session applicative. */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
