@@ -73,12 +73,14 @@ async function consumeChallenge(purpose: "register" | "login", userId?: string):
   }
 }
 
-export async function listPasskeys(userId: string): Promise<PasskeySummary[]> {
+/** null si la migration des passkeys n'a pas encore été appliquée. */
+export async function listPasskeys(userId: string): Promise<PasskeySummary[] | null> {
   const { data, error } = await getSupabaseAdmin()
     .from("passkeys")
     .select("id, device_name, created_at, last_used_at")
     .eq("user_id", userId)
     .order("created_at");
+  if (error?.code === "PGRST205" || error?.code === "42P01") return null;
   if (error) throw error;
   return data ?? [];
 }
