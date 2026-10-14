@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isDemoMode } from "@/lib/env";
 import {
   SESSION_COOKIE,
   checkRateLimit,
   clientIpHash,
   createSessionToken,
   recordLoginAttempt,
-  verifyPin,
+  signIn,
+  signOut,
 } from "@/lib/session";
 
 export async function POST(request: NextRequest) {
@@ -15,22 +17,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Trop de tentatives. Réessayez dans 15 minutes." }, { status: 429, headers: { "Retry-After": String(limit.retryAfter) } });
   }
   const body = await request.json().catch(() => ({}));
-  const valid = await verifyPin(String(body.pin ?? ""));
+  const valid = await signIn(String(body.email ?? ""), String(body.password ?? ""));
   await recordLoginAttempt(ipHash, valid);
-  if (!valid) return NextResponse.json({ error: "Code incorrect" }, { status: 401 });
+  if (!valid) return NextResponse.json({ error: "Email ou mot de passe incorrect" }, { status: 401 });
 
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(SESSION_COOKIE, await createSessionToken(), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60,
-  });
+  if (isDemoMode()) {
+    response.cookies.set(SESSION_COOKIE, await createSessionToken(), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/",
+      maxAge: 30 * 24 * 60 * 60,
+    });
+  }
   return response;
 }
 
 export async function DELETE() {
+  await signOut();
   const response = NextResponse.json({ ok: true });
   response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, sameSite: "strict", path: "/", maxAge: 0 });
   return response;

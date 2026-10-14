@@ -3,10 +3,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
-import bcrypt from "bcryptjs";
-import { isDemoMode, requireEnv } from "./env";
+import { isDemoMode } from "./env";
 import { getSupabaseAdmin } from "./supabase/admin";
+import { createClient } from "./supabase/server";
 
+/** Cookie de session du seul mode démo ; en production la session est celle de Supabase Auth. */
 export const SESSION_COOKIE = "budget_session";
 const THIRTY_DAYS = 30 * 24 * 60 * 60;
 const TWO_HOURS = 2 * 60 * 60;
@@ -43,6 +44,11 @@ export async function verifyBankCallbackToken(token: string, connectionId: strin
 }
 
 export async function hasValidSession(): Promise<boolean> {
+  if (!isDemoMode()) {
+    // getClaims vérifie la signature du JWT ; ne pas utiliser getSession pour autoriser.
+    const { data, error } = await (await createClient()).auth.getClaims();
+    return !error && Boolean(data?.claims?.sub);
+  }
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return false;
   try {
@@ -85,12 +91,20 @@ export async function recordLoginAttempt(ipHash: string, succeeded: boolean): Pr
   await getSupabaseAdmin().from("login_attempts").insert({ ip_hash: ipHash, succeeded });
 }
 
-export async function verifyPin(pin: string): Promise<boolean> {
-  if (!/^\d{4,8}$/.test(pin)) return false;
-  const configuredHash = process.env.APP_PIN_HASH;
-  if (configuredHash) return bcrypt.compare(pin, configuredHash);
-  if (!isDemoMode()) requireEnv("APP_PIN_HASH");
-  const expected = Buffer.from("1234");
-  const supplied = Buffer.from(pin);
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+export const DEMO_PASSWORD = "demo1234";
+
+/** Connecte l'utilisateur via Supabase Auth (cookies écrits par le client SSR). */
+export async function signIn(email: string, password: string): Promise<boolean> {
+  if (!email || !password) return false;
+  if (isDemoMode()) {
+    const expected = Buffer.from(DEMO_PASSWORD);
+    const supplied = Buffer.from(password);
+    return email.includes("@") && supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  }
+  const { error } = await (await createClient()).auth.signInWithPassword({ email: email.trim(), password });
+  return !error;
+}
+
+export async function signOut(): Promise<void> {
+  if (!isDemoMode()) await (await createClient()).auth.signOut();
 }
