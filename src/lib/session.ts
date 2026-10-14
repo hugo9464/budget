@@ -43,6 +43,15 @@ export async function verifyBankCallbackToken(token: string, connectionId: strin
   }
 }
 
+/** Identifiant et email de l'utilisateur Supabase connecté (hors mode démo). */
+export async function currentUser(): Promise<{ id: string; email: string } | null> {
+  if (isDemoMode()) return null;
+  const { data, error } = await (await createClient()).auth.getClaims();
+  const claims = data?.claims;
+  if (error || !claims?.sub) return null;
+  return { id: claims.sub, email: String(claims.email ?? "") };
+}
+
 export async function hasValidSession(): Promise<boolean> {
   if (!isDemoMode()) {
     // getClaims vérifie la signature du JWT ; ne pas utiliser getSession pour autoriser.

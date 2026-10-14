@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Icon } from "./icon";
+import { PasskeyLoginButton } from "./passkey-actions";
 
 export function UnlockForm({ demo }: { demo: boolean }) {
   const [email, setEmail] = useState("");
@@ -24,6 +25,7 @@ export function UnlockForm({ demo }: { demo: boolean }) {
   return <form className="unlock-card" onSubmit={login}>
     <div className="unlock-icon"><Icon name="lock"/></div>
     <div><p className="eyebrow">ESPACE PERSONNEL</p><h1>Bienvenue chez vous</h1><p className="muted">{demo ? <>Mode démo : n’importe quel email et le mot de passe <strong>demo1234</strong>.</> : "Connectez-vous pour accéder à votre budget."}</p></div>
+    {!demo ? <PasskeyLoginButton onError={setError}/> : null}
     <label htmlFor="email">Adresse email</label>
     <input className="text-input" id="email" name="email" type="email" inputMode="email" autoComplete="username" placeholder="vous@exemple.fr" value={email} onChange={(event) => setEmail(event.target.value)} autoFocus required />
     <label htmlFor="password">Mot de passe</label>
